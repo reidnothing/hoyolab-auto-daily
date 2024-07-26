@@ -3,6 +3,8 @@
 const args = process.argv.slice(2)
 const cookie = process.env.COOKIE
 const discordWebhook = process.env.DISCORD_WEBHOOK
+const discordUser = process.env.DISCORD_USER
+const msgDelimiter = ':'
 const messages = []
 const endpoints = {
   zzz: 'https://sg-act-nap-api.hoyolab.com/event/luna/zzz/os/sign?act_id=e202406031448091',
@@ -75,28 +77,33 @@ async function main() {
 
     const res = await fetch(url, { method: 'POST', headers, body })
     const json = await res.json()
-
-    // success responses
-    if (json.message === 'OK' || json.retcode === 0) {
-      log('info', `${game}: Successfully checked in!`)
-      continue
+    const code = String(json.retcode)
+    const successCodes = {
+      '0': 'Successfully checked in!',
+      '-5003': 'Already checked in for today',
     }
 
-    if (json.message.includes('already') || json.retcode === -5003) {
-      log('info', `${game}: Already checked in for today`)
+    // success responses
+    if (code in successCodes) {
+      log('info', game, `${successCodes[code]}`)
       continue
     }
 
     // error responses
-    log('debug', `${game}: Headers`, Object.fromEntries(res.headers))
-    log('debug', `${game}: Response`, json)
+    const errorCodes = {
+      '-100': 'Error not logged in. Your cookie is invalid, try setting up again',
+      '-10002': 'Error not found. You haven\'t played this game'
+    }
 
-    if (json.message === 'Not logged in' || json.retcode === -100) {
-      log('error', `${game}: Error not logged in`)
+    log('debug', game, `Headers`, Object.fromEntries(res.headers))
+    log('debug', game, `Response`, json)
+
+    if (code in errorCodes) {
+      log('error', game, `${errorCodes[code]}`)
       continue
     }
 
-    log('error', `${game}: Error undocumented, check debug headers and response`)
+    log('error', game, `Error undocumented, report to Issues page if this persists`)
   }
 
   // send to discord webhook if set and valid url
@@ -122,6 +129,11 @@ function log(type, ...data) {
     case 'error': hasErrors = true
   }
 
+  // check if it's a game specific message, and set it as uppercase for clarity, and add delimiter
+  if(data[0] in endpoints) {
+    data[0] = data[0].toUpperCase() + msgDelimiter
+  }
+
   // serialize data and add to messages
   const string = data
     .map(value => {
@@ -144,6 +156,11 @@ async function discordWebhookSend() {
     log('error', 'DISCORD_WEBHOOK is not a Discord webhook URL. Must start with `https://discord.com/api/webhooks/`')
     return
   }
+  let discordMsg = ""
+  if (discordUser) {
+      discordMsg = `<@${discordUser}>\n` 
+  }
+  discordMsg += messages.map(msg => `(${msg.type.toUpperCase()}) ${msg.string}`).join('\n')
 
   const res = await fetch(discordWebhook, {
     method: 'POST',
@@ -151,7 +168,7 @@ async function discordWebhookSend() {
       'content-type': 'application/json'
     },
     body: JSON.stringify({
-      content: messages.map(msg => `(${msg.type.toUpperCase()}) ${msg.string}`).join('\n')
+      content: discordMsg
     })
   })
 
